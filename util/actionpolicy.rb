@@ -12,6 +12,7 @@ module MCollective
         @agent = request.agent
         @caller = request.caller
         @action = request.action
+        @parameters = request.data
         @allow_unconfigured = !!(config.pluginconf.fetch('actionpolicy.allow_unconfigured', 'n') =~ /^1|y/i)
         @configdir = @config.configdir
       end
@@ -47,8 +48,13 @@ module MCollective
             else
               allow = false
             end
-          elsif line =~ /^(allow|deny)\t+(.+?)\t+(.+?)\t+(.+?)(\t+(.+?))*$/
-            if check_policy($2, $3, $4, $6)
+          elsif line =~ /^(allow|deny)\t+(.+?)\t+(.+?)\t+(.+?)(\t+(.+?)?)(\t+(.+?)?)$/
+            Log.warn("************************")
+            [$6,$8].each do |f|
+              Log.warn(f.inspect)
+            end
+            Log.warn("************************")
+            if check_policy($2, $3, $4, $6, $8)
               if $1 == 'allow'
                 return true
               else
@@ -64,7 +70,10 @@ module MCollective
       end
 
       # Check if a request made by a caller matches the state defined in the policy
-      def check_policy(rpccaller, actions, facts, classes)
+      def check_policy(rpccaller, actions, facts, classes, parameters)
+        # TODO Hack because I ran out of energy
+        classes = parameters if classes == nil && parameters != nil
+
         # If we have a wildcard caller or the caller matches our policy line
         # then continue else skip this policy line\
         if (rpccaller != '*') && (rpccaller != @caller)
@@ -77,11 +86,33 @@ module MCollective
           return false
         end
 
+        Log.warn(parameters)
+        if parameters
+          return false unless parse_parameters(parameters)
+        end
+
         unless classes
           return parse_compound(facts)
         else
           return parse_facts(facts) && parse_classes(classes)
         end
+      end
+
+      def parse_parameters(parameters)
+        return true if parameters == '*'
+
+        parameters = parameters.split(/\s|,/)
+
+        parameters.each do |param|
+          p, v = param.split('=')
+          p = p.to_sym
+
+          if @parameters.keys.include?(p)
+            return false unless @parameters[p] == v
+          end
+        end
+
+        true
       end
 
       def parse_facts(facts)
